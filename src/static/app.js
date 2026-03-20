@@ -4,14 +4,24 @@ document.addEventListener("DOMContentLoaded", () => {
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
 
+  function escapeHtml(value) {
+    return value
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
   // Function to fetch activities from API
   async function fetchActivities() {
     try {
-      const response = await fetch("/activities");
+      const response = await fetch("/activities", { cache: "no-store" });
       const activities = await response.json();
 
       // Clear loading message
       activitiesList.innerHTML = "";
+      activitySelect.innerHTML = '<option value="">-- Select an activity --</option>';
 
       // Populate activities list
       Object.entries(activities).forEach(([name, details]) => {
@@ -19,12 +29,38 @@ document.addEventListener("DOMContentLoaded", () => {
         activityCard.className = "activity-card";
 
         const spotsLeft = details.max_participants - details.participants.length;
+        const participantsList = details.participants
+          .map(
+            (participant) => `
+              <li class="participant-item">
+                <span class="participant-email">${escapeHtml(participant)}</span>
+                <button
+                  type="button"
+                  class="participant-remove"
+                  data-activity="${encodeURIComponent(name)}"
+                  data-email="${encodeURIComponent(participant)}"
+                  title="Unregister participant"
+                  aria-label="Unregister ${escapeHtml(participant)} from ${escapeHtml(name)}"
+                >
+                  ✕
+                </button>
+              </li>
+            `
+          )
+          .join("");
+        const participantsSection = details.participants.length
+          ? `<ul class="participants-list">${participantsList}</ul>`
+          : '<p class="no-participants">No participants yet.</p>';
 
         activityCard.innerHTML = `
           <h4>${name}</h4>
           <p>${details.description}</p>
           <p><strong>Schedule:</strong> ${details.schedule}</p>
           <p><strong>Availability:</strong> ${spotsLeft} spots left</p>
+          <div class="participants-section">
+            <p class="participants-title">Participants</p>
+            ${participantsSection}
+          </div>
         `;
 
         activitiesList.appendChild(activityCard);
@@ -62,6 +98,7 @@ document.addEventListener("DOMContentLoaded", () => {
         messageDiv.textContent = result.message;
         messageDiv.className = "success";
         signupForm.reset();
+        await fetchActivities();
       } else {
         messageDiv.textContent = result.detail || "An error occurred";
         messageDiv.className = "error";
@@ -79,6 +116,42 @@ document.addEventListener("DOMContentLoaded", () => {
       messageDiv.classList.remove("hidden");
       console.error("Error signing up:", error);
     }
+  });
+
+  activitiesList.addEventListener("click", async (event) => {
+    const removeButton = event.target.closest(".participant-remove");
+    if (!removeButton) {
+      return;
+    }
+
+    const { activity, email } = removeButton.dataset;
+    const activityName = decodeURIComponent(activity);
+    const participantEmail = decodeURIComponent(email);
+
+    try {
+      const response = await fetch(`/activities/${activity}/participants?email=${email}`, {
+        method: "DELETE",
+      });
+      const result = await response.json();
+
+      if (response.ok) {
+        messageDiv.textContent = result.message;
+        messageDiv.className = "success";
+        await fetchActivities();
+      } else {
+        messageDiv.textContent = result.detail || "Could not unregister participant.";
+        messageDiv.className = "error";
+      }
+    } catch (error) {
+      messageDiv.textContent = `Failed to unregister ${participantEmail} from ${activityName}.`;
+      messageDiv.className = "error";
+      console.error("Error unregistering participant:", error);
+    }
+
+    messageDiv.classList.remove("hidden");
+    setTimeout(() => {
+      messageDiv.classList.add("hidden");
+    }, 5000);
   });
 
   // Initialize app
